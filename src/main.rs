@@ -4,8 +4,8 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::max;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 const INPUT: [&str; 143] = [
     "000000", "000066", "000099", "0000CC", "0000FF", "003300", "003366", "003399", "0033CC",
@@ -54,8 +54,7 @@ impl ColorInt {
     }
 }
 
-#[derive(Eq, Hash, PartialEq, Clone)]
-#[derive(Debug)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 struct ColorConstruction {
     color1: u32,
     color2: u32,
@@ -92,13 +91,19 @@ fn check_channels<const D: i16>(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<C
     let dr = c2.r as i16 - c1.r as i16;
 
     // The compiler sees "dr % 2" (or 5, 10, etc.) and optimizes it.
-    if dr % D != 0 { return None; }
+    if dr % D != 0 {
+        return None;
+    }
 
     let dg = c2.g as i16 - c1.g as i16;
-    if dg % D != 0 { return None; }
+    if dg % D != 0 {
+        return None;
+    }
 
     let db = c2.b as i16 - c1.b as i16;
-    if db % D != 0 { return None; }
+    if db % D != 0 {
+        return None;
+    }
 
     Some(ColorInt {
         // We still need 't' here to calculate the actual blended color
@@ -135,19 +140,19 @@ enum MixDetailed {
 }
 fn trace_color(mix: &ColorMix, constructions: &Vec<OnceLock<ColorMix>>) -> MixDetailed {
     match mix {
-        ColorMix::Base(a) => {
-            MixDetailed::Base(ColorInt::from_index(*a))
-        }
-        ColorMix::Mixed(construction) => {
-            MixDetailed::Mixed(
-                ColorDetailed {
-                    color1: Box::from(trace_color(&constructions[construction.color1 as usize].get().unwrap(), constructions)),
-                    color2: Box::from(trace_color(&constructions[construction.color2 as usize].get().unwrap(), constructions)),
-                    transparency: construction.transparency,
-                    steps: construction.steps,
-                }
-            )
-        }
+        ColorMix::Base(a) => MixDetailed::Base(ColorInt::from_index(*a)),
+        ColorMix::Mixed(construction) => MixDetailed::Mixed(ColorDetailed {
+            color1: Box::from(trace_color(
+                &constructions[construction.color1 as usize].get().unwrap(),
+                constructions,
+            )),
+            color2: Box::from(trace_color(
+                &constructions[construction.color2 as usize].get().unwrap(),
+                constructions,
+            )),
+            transparency: construction.transparency,
+            steps: construction.steps,
+        }),
     }
 }
 
@@ -165,17 +170,36 @@ fn main() {
         })
         .collect();
 
-    let interesting_values = [0u8,1u8,255u8];
-    let mut interesting_colors: Vec<ColorInt> = vec!();
-    for r in &interesting_values {
-        for g in &interesting_values {
-            for b in &interesting_values {
-                let color = ColorInt { r: *r, g: *g, b: *b };
-                interesting_colors.push(color);
-            }
-        }
+    // let interesting_values = [0u8, 1u8, 255u8];
+    // let mut interesting_colors: Vec<ColorInt> = vec![];
+    // for r in &interesting_values {
+    //     for g in &interesting_values {
+    //         for b in &interesting_values {
+    //             let color = ColorInt {
+    //                 r: *r,
+    //                 g: *g,
+    //                 b: *b,
+    //             };
+    //             interesting_colors.push(color);
+    //         }
+    //     }
+    // }
+    let critical_values: Vec<u8> = [
+        1, 2, 4, 7, 8, 11, 13, 14, 16, 19, 22, 23, 26, 28, 29, 31, 32, 37, 38, 41, 43, 44, 46, 47,
+        49, 52, 53, 56, 58, 59, 61, 62, 64, 67, 71, 73, 74, 76, 77, 79, 82, 83, 86, 88, 89, 91, 92,
+        94, 97, 98, 101, 103, 104, 106, 107, 109, 112, 113, 116, 118, 121, 122, 124, 127, 128, 131,
+        133, 134, 137, 139, 142, 143, 146, 148, 149, 151, 152, 154, 157, 158, 161, 163, 164, 166,
+        167, 169, 172, 173, 176, 178, 179, 181, 182, 184, 188, 191, 193, 194, 196, 197, 199, 202,
+        203, 206, 208, 209, 211, 212, 214, 217, 218, 223, 224, 226, 227, 229, 232, 233, 236, 239,
+        241, 242, 244, 247, 248, 251, 253, 254,
+    ]
+    .try_into()
+    .unwrap();
+    let mut critical_array: [bool; 256] = [false; 256];
+    for v in critical_values {
+        critical_array[v as usize] = true;
     }
-    let interesting_indices: Vec<u32> = interesting_colors.iter().map(|c| c.to_index()).collect();
+    // let interesting_indices: Vec<u32> = interesting_colors.iter().map(|c| c.to_index()).collect();
     // let color_fractions: Vec<ColorFractions> = colors
     //     .iter()
     //     .clone()
@@ -226,7 +250,7 @@ fn main() {
         // println!("Combinations tried: {}", combination_mixed.len());
         println!("Constructions found: {}", total.get_mut());
         println!();
-        let mut keys: Vec<u32> = vec!();
+        let mut keys: Vec<u32> = vec![];
         for i in 0..TOTAL_COLORS {
             if constructions[i].get().is_some() {
                 keys.push(i as u32);
@@ -239,7 +263,11 @@ fn main() {
                 // }
                 // combination_mixed[*color as usize][*other_color as usize].store(true, Ordering::Relaxed);
                 for transparency in &TRANSPARENCIES {
-                    if let Some(mixed_color) = average_colors(&ColorInt::from_index(*color), &ColorInt::from_index(*other_color), *transparency) {
+                    if let Some(mixed_color) = average_colors(
+                        &ColorInt::from_index(*color),
+                        &ColorInt::from_index(*other_color),
+                        *transparency,
+                    ) {
                         let mixed_index = mixed_color.to_index() as usize;
                         if constructions[mixed_index].get().is_none() {
                             // let const1 = constructions.get(color).unwrap();
@@ -251,18 +279,31 @@ fn main() {
                                 steps: 0, //max(const1_steps, const2_steps) + 1,
                             };
 
-                            if constructions[mixed_index].set(ColorMix::Mixed(construction.clone())).is_ok() {
+                            if constructions[mixed_index]
+                                .set(ColorMix::Mixed(construction.clone()))
+                                .is_ok()
+                            {
                                 if interesting_indices.contains(&(mixed_index as u32)) {
                                     let it = interesting_total.fetch_add(1, Ordering::Relaxed);
                                     println!("Interesting constructions found: {}", it);
-                                    println!("{:#?}", trace_color(&ColorMix::Mixed(construction.clone()), &constructions));
+                                    println!(
+                                        "{:#?}",
+                                        trace_color(
+                                            &ColorMix::Mixed(construction.clone()),
+                                            &constructions
+                                        )
+                                    );
                                 }
                                 let t = total.fetch_add(1, Ordering::Relaxed);
                                 // if t & (2<<20)-1 == 0 {
                                 //     std::process::exit(0);
                                 // }
-                                if t & (2<<16)-1 == 0 {
-                                    println!("Constructions found: {} ({}%)", t, t as f64/(TOTAL_COLORS as f64) * 100.0);
+                                if t & (2 << 16) - 1 == 0 {
+                                    println!(
+                                        "Constructions found: {} ({}%)",
+                                        t,
+                                        t as f64 / (TOTAL_COLORS as f64) * 100.0
+                                    );
                                 }
                                 if t == TOTAL_COLORS as u32 {
                                     println!("All colors constructed!");
