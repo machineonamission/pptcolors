@@ -1,11 +1,9 @@
-use dashmap::{DashMap, DashSet};
-use num::{BigInt, FromPrimitive, Rational64};
+use num::Rational64;
 use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
-use rustc_hash::{FxHashMap, FxHashSet};
-use std::cmp::max;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use rustc_hash::FxHashSet;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 const INPUT: [&str; 143] = [
     "000000", "000066", "000099", "0000CC", "0000FF", "003300", "003366", "003399", "0033CC",
@@ -33,13 +31,6 @@ struct ColorInt {
     b: u8,
 }
 
-#[derive(Eq, Hash, PartialEq, Clone)]
-struct ColorFractions {
-    r: Rational64,
-    g: Rational64,
-    b: Rational64,
-}
-
 impl ColorInt {
     fn to_index(&self) -> u32 {
         (self.r as u32) << 16 | (self.g as u32) << 8 | (self.b as u32)
@@ -54,13 +45,12 @@ impl ColorInt {
     }
 }
 
-#[derive(Eq, Hash, PartialEq, Clone)]
-#[derive(Debug)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 struct ColorConstruction {
     color1: u32,
     color2: u32,
     transparency: u8,
-    steps: usize,
+    result: u32,
 }
 
 #[derive(Eq, Hash, PartialEq, Clone)]
@@ -92,13 +82,19 @@ fn check_channels<const D: i16>(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<C
     let dr = c2.r as i16 - c1.r as i16;
 
     // The compiler sees "dr % 2" (or 5, 10, etc.) and optimizes it.
-    if dr % D != 0 { return None; }
+    if dr % D != 0 {
+        return None;
+    }
 
     let dg = c2.g as i16 - c1.g as i16;
-    if dg % D != 0 { return None; }
+    if dg % D != 0 {
+        return None;
+    }
 
     let db = c2.b as i16 - c1.b as i16;
-    if db % D != 0 { return None; }
+    if db % D != 0 {
+        return None;
+    }
 
     Some(ColorInt {
         // We still need 't' here to calculate the actual blended color
@@ -108,55 +104,229 @@ fn check_channels<const D: i16>(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<C
     })
 }
 
-fn average_colors_fractions(
-    color1: &ColorFractions,
-    color2: &ColorFractions,
-    ratio: &Rational64,
-    inv_ratio: &Rational64,
-) -> ColorFractions {
-    ColorFractions {
-        r: &color1.r * ratio + &color2.r * inv_ratio,
-        g: &color1.g * ratio + &color2.g * inv_ratio,
-        b: &color1.b * ratio + &color2.b * inv_ratio,
+fn invert_channel<const t: u8>(avg: u8, val: u8) -> Option<u8> {
+    let top = 100 * avg as i16 - (val as i16 * t as i16);
+    let bottom = 100 - t as i16;
+    if top % bottom == 0 {
+        let res = (top / bottom);
+        if 0 <= res && res <= 255 {
+            Some(res as u8)
+        } else {
+            None
+        }
+    } else {
+        None
     }
 }
 
-#[derive(Eq, Hash, PartialEq, Clone, Debug)]
-struct ColorDetailed {
-    color1: Box<MixDetailed>,
-    color2: Box<MixDetailed>,
-    transparency: u8,
-    steps: usize,
-}
-#[derive(Eq, Hash, PartialEq, Clone, Debug)]
-enum MixDetailed {
-    Base(ColorInt),
-    Mixed(ColorDetailed),
-}
-fn trace_color(mix: &ColorMix, constructions: &Vec<OnceLock<ColorMix>>) -> MixDetailed {
-    match mix {
-        ColorMix::Base(a) => {
-            MixDetailed::Base(ColorInt::from_index(*a))
-        }
-        ColorMix::Mixed(construction) => {
-            MixDetailed::Mixed(
-                ColorDetailed {
-                    color1: Box::from(trace_color(&constructions[construction.color1 as usize].get().unwrap(), constructions)),
-                    color2: Box::from(trace_color(&constructions[construction.color2 as usize].get().unwrap(), constructions)),
-                    transparency: construction.transparency,
-                    steps: construction.steps,
-                }
-            )
-        }
+fn inverse_channel_general(average: u8, color: u8, t: u8) -> Option<u8> {
+    // The numbers go inside ::< ... > because they are compile-time constants.
+    // 't' stays in the ( ... ) because it is used for the final calculation.
+    match t {
+        15 => invert_channel::<15>(average, color),
+        30 => invert_channel::<30>(average, color),
+        50 => invert_channel::<50>(average, color),
+        65 => invert_channel::<65>(average, color),
+        80 => invert_channel::<80>(average, color),
+        95 => invert_channel::<95>(average, color),
+        _ => panic!("uh"),
     }
 }
+
+fn inverse_average<const t: u8>(average: &ColorInt, color: &ColorInt) -> Option<ColorInt> {
+    Some(ColorInt {
+        r: invert_channel::<t>(average.r, color.r)?,
+        g: invert_channel::<t>(average.g, color.g)?,
+        b: invert_channel::<t>(average.b, color.b)?,
+    })
+}
+
+fn inverse_general(average: &ColorInt, color: &ColorInt, t: u8) -> Option<ColorInt> {
+    // The numbers go inside ::< ... > because they are compile-time constants.
+    // 't' stays in the ( ... ) because it is used for the final calculation.
+    match t {
+        15 => inverse_average::<15>(average, color),
+        30 => inverse_average::<30>(average, color),
+        50 => inverse_average::<50>(average, color),
+        65 => inverse_average::<65>(average, color),
+        80 => inverse_average::<80>(average, color),
+        95 => inverse_average::<95>(average, color),
+        _ => panic!("uh"),
+    }
+}
+
+// #[derive(Eq, Hash, PartialEq, Clone, Debug)]
+// struct ColorDetailed {
+//     color1: Box<MixDetailed>,
+//     color2: Box<MixDetailed>,
+//     transparency: u8,
+//     steps: usize,
+// }
+// #[derive(Eq, Hash, PartialEq, Clone, Debug)]
+// enum MixDetailed {
+//     Base(ColorInt),
+//     Mixed(ColorDetailed),
+// }
+// fn trace_color(mix: &ColorMix, constructions: &Vec<OnceLock<ColorMix>>) -> MixDetailed {
+//     match mix {
+//         ColorMix::Base(a) => {
+//             MixDetailed::Base(ColorInt::from_index(*a))
+//         }
+//         ColorMix::Mixed(construction) => {
+//             MixDetailed::Mixed(
+//                 ColorDetailed {
+//                     color1: Box::from(trace_color(&constructions[construction.color1 as usize].get().unwrap(), constructions)),
+//                     color2: Box::from(trace_color(&constructions[construction.color2 as usize].get().unwrap(), constructions)),
+//                     transparency: construction.transparency,
+//                     steps: construction.steps,
+//                 }
+//             )
+//         }
+//     }
+// }
 
 const TRANSPARENCIES: [u8; 6] = [15, 30, 50, 65, 80, 95];
 
 const TOTAL_COLORS: usize = 2usize.pow(8).pow(3);
 
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
+enum ConstructionStatus {
+    IsBase,
+    FromBase(ColorConstruction),        // constructed from base colors
+    Incomplete(Vec<ColorConstruction>), // the constructions that USE this color, its CHILDREN
+    Unconstructable,
+}
+
+fn cascade_base(
+    children: &Vec<ColorConstruction>,
+    index: usize,
+    all_constructions: &mut Vec<ConstructionStatus>,
+) {
+    let mut base_construction: Option<ColorConstruction> = None;
+    for construction in children.clone() {
+        if let ConstructionStatus::IsBase | ConstructionStatus::FromBase(_) =
+            all_constructions[construction.color1 as usize]
+            && let ConstructionStatus::IsBase | ConstructionStatus::FromBase(_) =
+                all_constructions[construction.color2 as usize]
+        {
+            base_construction = Some(construction.clone());
+            break;
+        }
+    }
+    if let Some(base_construction) = base_construction {
+        all_constructions[index] = ConstructionStatus::FromBase(base_construction.clone());
+        for construction in children.clone() {
+            if let ConstructionStatus::Incomplete(new_children) =
+                all_constructions[construction.result as usize].clone()
+            {
+                cascade_base(
+                    &new_children,
+                    construction.result as usize,
+                    all_constructions,
+                );
+            }
+        }
+    }
+}
+
+fn attempt_store_construction(
+    construction: ColorConstruction,
+    constructions: &mut Vec<ConstructionStatus>,
+    try_next: &mut Vec<bool>,
+) {
+    let result_index = construction.result as usize;
+    // if this new construction already has a known base, ignore
+    if let ConstructionStatus::IsBase | ConstructionStatus::FromBase(_) =
+        &constructions[result_index]
+    {
+        return;
+    }
+
+    // if new construction comes from bases, store it and cascade
+    if let ConstructionStatus::IsBase | ConstructionStatus::FromBase(_) =
+        &constructions[construction.color1 as usize]
+        && let ConstructionStatus::IsBase | ConstructionStatus::FromBase(_) =
+            &constructions[construction.color2 as usize]
+    {
+        constructions[construction.result as usize] =
+            ConstructionStatus::FromBase(construction.clone());
+        cascade_base(&vec![construction.clone()], result_index, constructions);
+    }
+
+    for i in [&construction.color1, &construction.color2] {
+        match &mut constructions[*i as usize] {
+            ConstructionStatus::Incomplete(existing_constructions) => {
+                existing_constructions.push(construction.clone());
+                try_next[*i as usize] = true;
+            }
+            ConstructionStatus::Unconstructable => {
+                let mut new_vec = Vec::new();
+                new_vec.push(construction.clone());
+                constructions[*i as usize] =
+                    ConstructionStatus::Incomplete(new_vec);
+                try_next[*i as usize] = true;
+            }
+            _ => {}
+        }
+    }
+}
+
+fn store_inverses(
+    color: &ColorInt,
+    constructions: &mut Vec<ConstructionStatus>,
+    try_next: &mut Vec<bool>,
+) {
+    for transparency in &TRANSPARENCIES {
+        let mut r_inverses: Vec<(u8, u8)> = vec![];
+        for r in 0u8..=255u8 {
+            if let Some(inverse_color) = inverse_channel_general(color.r, r, *transparency) {
+                r_inverses.push((r, inverse_color));
+            }
+        }
+        let mut g_inverses: Vec<(u8, u8)> = vec![];
+        for g in 0u8..=255u8 {
+            if let Some(inverse_color) = inverse_channel_general(color.g, g, *transparency) {
+                g_inverses.push((g, inverse_color));
+            }
+        }
+        let mut b_inverses: Vec<(u8, u8)> = vec![];
+        for b in 0u8..=255u8 {
+            if let Some(inverse_color) = inverse_channel_general(color.b, b, *transparency) {
+                b_inverses.push((b, inverse_color));
+            }
+        }
+        for r_inverse in &r_inverses {
+            for g_inverse in &g_inverses {
+                for b_inverse in &b_inverses {
+                    let color1 = ColorInt {
+                        r: r_inverse.0,
+                        g: g_inverse.0,
+                        b: b_inverse.0,
+                    }
+                    .to_index();
+                    let color2 = ColorInt {
+                        r: r_inverse.1,
+                        g: g_inverse.1,
+                        b: b_inverse.1,
+                    }
+                    .to_index();
+                    if color1 != color2 {
+                        let construction = ColorConstruction {
+                            color1,
+                            color2,
+                            transparency: transparency.clone(),
+                            result: color.to_index(),
+                        };
+                        attempt_store_construction(construction, constructions, try_next);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn main() {
-    let colors: Vec<ColorInt> = INPUT
+    let base_colors: Vec<ColorInt> = INPUT
         .iter()
         .map(|&hex| ColorInt {
             r: hex_to_int(&hex[0..2]),
@@ -165,17 +335,38 @@ fn main() {
         })
         .collect();
 
-    let interesting_values = [0u8,1u8,255u8];
-    let mut interesting_colors: Vec<ColorInt> = vec!();
-    for r in &interesting_values {
-        for g in &interesting_values {
-            for b in &interesting_values {
-                let color = ColorInt { r: *r, g: *g, b: *b };
-                interesting_colors.push(color);
-            }
-        }
+    let base_indices: Vec<u32> = base_colors.iter().map(|c| c.to_index()).collect();
+
+    let base_map: FxHashSet<u32> = FxHashSet::from_iter(base_indices.clone());
+
+    // let interesting_values = [0u8, 1u8, 255u8];
+    let mut interesting_colors: Vec<ColorInt> = vec![];
+    // for r in &interesting_values {
+    //     for g in &interesting_values {
+    //         for b in &interesting_values {
+    //             let color = ColorInt {
+    //                 r: *r,
+    //                 g: *g,
+    //                 b: *b,
+    //             };
+    //             interesting_colors.push(color);
+    //         }
+    //     }
+    // }
+    for (r, g, b) in [
+        (0, 255, 1),
+        (1, 0, 255),
+        (1, 1, 255),
+        (1, 255, 0),
+        (1, 255, 1),
+        (1, 255, 255),
+        (255, 0, 1),
+        (255, 255, 1),
+    ] {
+        interesting_colors.push(ColorInt { r, g, b });
     }
     let interesting_indices: Vec<u32> = interesting_colors.iter().map(|c| c.to_index()).collect();
+    println!("{:?}", interesting_indices);
     // let color_fractions: Vec<ColorFractions> = colors
     //     .iter()
     //     .clone()
@@ -205,75 +396,55 @@ fn main() {
     //     .map(|_| (0..TOTAL_COLORS).map(|_| AtomicBool::new(false)).collect())
     //     .collect();
 
-    let constructions: Vec<OnceLock<ColorMix>> = std::iter::repeat_with(OnceLock::new)
-        .take(TOTAL_COLORS)
+    let mut constructions: Vec<ConstructionStatus> = (0..TOTAL_COLORS)
+        .map(|_| ConstructionStatus::Unconstructable)
         .collect();
+    for base in &base_indices {
+        constructions[*base as usize] = ConstructionStatus::IsBase;
+    }
 
     // let mut int_constructions: FxHashSet<ColorFractions> = FxHashSet::default();
-    let mut interesting_total = AtomicU32::new(0);
-
-    for color in &colors {
-        if interesting_indices.contains(&(color.to_index())) {
-            interesting_total.fetch_add(1, Ordering::Relaxed);
-        }
-        constructions[color.to_index() as usize].set(ColorMix::Base(color.to_index()));
-        // int_constructions.insert(color.clone());
-    }
-    let mut total = AtomicU32::new(0);
+    let mut tries = 0;
     let mut iteration = 1;
+    let mut try_inverses = vec![false; TOTAL_COLORS];
+    for base in &interesting_indices {
+        try_inverses[*base as usize] = true;
+    }
     loop {
         println!("iteration: {}", iteration);
         // println!("Combinations tried: {}", combination_mixed.len());
-        println!("Constructions found: {}", total.get_mut());
         println!();
-        let mut keys: Vec<u32> = vec!();
-        for i in 0..TOTAL_COLORS {
-            if constructions[i].get().is_some() {
-                keys.push(i as u32);
-            }
-        }
-        keys.par_iter().for_each(|color| {
-            for other_color in &keys {
-                // if combination_mixed[*color as usize][*other_color as usize].load(Ordering::Relaxed) {
-                //     continue;
+        let iteration_indices = try_inverses.clone();
+        try_inverses = vec![false; TOTAL_COLORS];
+        iteration_indices
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| **v)
+            .for_each(|(index, _)| {
+                tries += 1;
+                // if tries > 100000{
+                //     std::process::exit(0);
                 // }
-                // combination_mixed[*color as usize][*other_color as usize].store(true, Ordering::Relaxed);
-                for transparency in &TRANSPARENCIES {
-                    if let Some(mixed_color) = average_colors(&ColorInt::from_index(*color), &ColorInt::from_index(*other_color), *transparency) {
-                        let mixed_index = mixed_color.to_index() as usize;
-                        if constructions[mixed_index].get().is_none() {
-                            // let const1 = constructions.get(color).unwrap();
-                            // let const2 = constructions.get(other_color).unwrap();
-                            let construction = ColorConstruction {
-                                color1: color.clone(),
-                                color2: other_color.clone(),
-                                transparency: transparency.clone(),
-                                steps: 0, //max(const1_steps, const2_steps) + 1,
-                            };
-
-                            if constructions[mixed_index].set(ColorMix::Mixed(construction.clone())).is_ok() {
-                                if interesting_indices.contains(&(mixed_index as u32)) {
-                                    let it = interesting_total.fetch_add(1, Ordering::Relaxed);
-                                    println!("Interesting constructions found: {}", it);
-                                    println!("{:#?}", trace_color(&ColorMix::Mixed(construction.clone()), &constructions));
-                                }
-                                let t = total.fetch_add(1, Ordering::Relaxed);
-                                // if t & (2<<20)-1 == 0 {
-                                //     std::process::exit(0);
-                                // }
-                                if t & (2<<16)-1 == 0 {
-                                    println!("Constructions found: {} ({}%)", t, t as f64/(TOTAL_COLORS as f64) * 100.0);
-                                }
-                                if t == TOTAL_COLORS as u32 {
-                                    println!("All colors constructed!");
-                                    std::process::exit(0);
-                                }
-                            }
-                        }
-                    }
+                // println!("{index}");
+                if tries % 10_000 == 0 {
+                    // std::process::exit(0);
+                    let cools = interesting_indices
+                        .iter()
+                        .map(|i| constructions[*i as usize].clone())
+                        .filter(|c| matches!(c, ConstructionStatus::FromBase(_)))
+                        .collect::<Vec<_>>();
+                    println!("{:?}\nCOUNT: {}", cools, cools.len());
                 }
-            }
-        });
+                let color = ColorInt::from_index(index as u32);
+                store_inverses(&color, &mut constructions, &mut try_inverses);
+            });
+        println!("{}", try_inverses.iter().filter(|v| **v).count());
+        // for base in &base_indices {
+        //     print!("{:?} ", constructions[*base as usize]);
+        // }
         iteration += 1;
+        if iteration > 100 {
+            return;
+        }
     }
 }
