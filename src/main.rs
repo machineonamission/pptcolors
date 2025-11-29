@@ -54,7 +54,7 @@ impl ColorInt {
     }
 }
 
-#[derive(Eq, Hash, PartialEq, Clone)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 struct ColorConstruction {
     color1: u32,
     color2: u32,
@@ -62,7 +62,21 @@ struct ColorConstruction {
     steps: usize,
 }
 
-#[derive(Eq, Hash, PartialEq, Clone)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
+struct ColorDetailed {
+    color1: Box<MixDetailed>,
+    color2: Box<MixDetailed>,
+    transparency: u8,
+    steps: usize,
+}
+
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
+enum MixDetailed {
+    Base(ColorInt),
+    Mixed(ColorDetailed),
+}
+
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 enum ColorMix {
     Base(u32),
     Mixed(ColorConstruction),
@@ -88,22 +102,24 @@ fn average_colors(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<ColorInt> {
 // 2. We take 3 runtime arguments: c1, c2, t
 #[inline(always)]
 fn check_channels<const D: i16>(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<ColorInt> {
-    let dr = c2.r as i16 - c1.r as i16;
+    // 1. Pre-calculate constants for the frame/pixel
+    // All math fits in u16 (Max value: 255 * 100 + 50 = 25,550)
+    let t = t as u16;
+    let inv_t = 100 - t;
 
-    // The compiler sees "dr % 2" (or 5, 10, etc.) and optimizes it.
-    if dr % D != 0 { return None; }
-
-    let dg = c2.g as i16 - c1.g as i16;
-    if dg % D != 0 { return None; }
-
-    let db = c2.b as i16 - c1.b as i16;
-    if db % D != 0 { return None; }
+    // 2. The Branchless Calculation
+    // We define a closure (or macro) to enforce inlining
+    let blend_channel = |v1: u8, v2: u8| -> u8 {
+        // Formula: (v1 * (100-t) + v2 * t + 50) / 100
+        // The "+ 50" automatically rounds to nearest integer
+        let sum = (v1 as u16 * inv_t) + (v2 as u16 * t) + 50;
+        (sum / 100) as u8
+    };
 
     Some(ColorInt {
-        // We still need 't' here to calculate the actual blended color
-        r: (c1.r as i16 + (dr * t as i16) / 100) as u8,
-        g: (c1.g as i16 + (dg * t as i16) / 100) as u8,
-        b: (c1.b as i16 + (db * t as i16) / 100) as u8,
+        r: blend_channel(c1.r, c2.r),
+        g: blend_channel(c1.g, c2.g),
+        b: blend_channel(c1.b, c2.b),
     })
 }
 
@@ -123,6 +139,25 @@ fn average_colors_fractions(
 const TRANSPARENCIES: [u8; 6] = [15, 30, 50, 65, 80, 95];
 
 const TOTAL_COLORS: usize = 2usize.pow(8).pow(3);
+
+
+fn trace_color(mix: &ColorMix, constructions: &Vec<OnceLock<ColorMix>>) -> MixDetailed {
+    match mix {
+        ColorMix::Base(a) => {
+            MixDetailed::Base(ColorInt::from_index(*a))
+        }
+        ColorMix::Mixed(construction) => {
+            MixDetailed::Mixed(
+                ColorDetailed {
+                    color1: Box::from(trace_color(&constructions[construction.color1 as usize].get().unwrap(), constructions)),
+                    color2: Box::from(trace_color(&constructions[construction.color2 as usize].get().unwrap(), constructions)),
+                    transparency: construction.transparency,
+                    steps: construction.steps,
+                }
+            )
+        }
+    }
+}
 
 fn main() {
     let colors: Vec<ColorInt> = INPUT
@@ -180,16 +215,16 @@ fn main() {
     // let mut int_constructions: FxHashSet<ColorFractions> = FxHashSet::default();
 
     let mut interesting_total = AtomicU32::new(0);
+    let mut total = AtomicU32::new(0);
 
     for color in &colors {
         if interesting_indices.contains(&(color.to_index())) {
             interesting_total.fetch_add(1, Ordering::Relaxed);
         }
         constructions[color.to_index() as usize].set(ColorMix::Base(color.to_index()));
+        total.fetch_add(1, Ordering::Relaxed);
         // int_constructions.insert(color.clone());
     }
-    let mut total = AtomicU32::new(0);
-    let mut total = AtomicU32::new(0);
     let mut iteration = 1;
     let mut next_constructions = constructions.clone();
     loop {
@@ -225,7 +260,7 @@ fn main() {
                                 steps: 0, //max(const1_steps, const2_steps) + 1,
                             };
                             if constructions[mixed_index].set(ColorMix::Mixed(construction.clone())).is_ok() {
-                                next_constructions[mixed_index].set(ColorMix::Mixed(construction));
+                                next_constructions[mixed_index].set(ColorMix::Mixed(construction.clone()));
                                 if interesting_indices.contains(&(mixed_index as u32)) {
                                     let it = interesting_total.fetch_add(1, Ordering::Relaxed);
                                     println!("Interesting constructions found: {}", it);
@@ -238,8 +273,9 @@ fn main() {
                                 if t & (2<<16)-1 == 0 {
                                     println!("Constructions found: {} ({}%)", t, t as f64/(TOTAL_COLORS as f64) * 100.0);
                                 }
-                                if t == TOTAL_COLORS as u32 {
+                                if t+1 == TOTAL_COLORS as u32 {
                                     println!("All colors constructed!");
+                                    println!("{:#?}", trace_color(&ColorMix::Mixed(construction.clone()), &constructions));
                                     std::process::exit(0);
                                 }
                             }
