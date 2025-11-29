@@ -72,26 +72,38 @@ fn hex_to_int(hex: &str) -> u8 {
     u8::from_str_radix(hex, 16).unwrap()
 }
 
-fn average_colors(color1: &ColorInt, color2: &ColorInt, transparency: u8) -> Option<ColorInt> {
-    let r_100 =
-        (color1.r as u16 * (100 - transparency) as u16 + color2.r as u16 * transparency as u16);
-    if r_100 % 100 != 0 {
-        return None;
+fn average_colors(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<ColorInt> {
+    // The numbers go inside ::< ... > because they are compile-time constants.
+    // 't' stays in the ( ... ) because it is used for the final calculation.
+    match t {
+        50 => check_channels::<2>(c1, c2, t),
+        80 => check_channels::<5>(c1, c2, t),
+        30 => check_channels::<10>(c1, c2, t),
+        15 | 65 | 95 => check_channels::<20>(c1, c2, t),
+        _ => None,
     }
-    let g_100 =
-        (color1.g as u16 * (100 - transparency) as u16 + color2.g as u16 * transparency as u16);
-    if g_100 % 100 != 0 {
-        return None;
-    }
-    let b_100 =
-        (color1.b as u16 * (100 - transparency) as u16 + color2.b as u16 * transparency as u16);
-    if b_100 % 100 != 0 {
-        return None;
-    }
+}
+
+// 1. 'D' is defined here as a const generic parameter
+// 2. We take 3 runtime arguments: c1, c2, t
+#[inline(always)]
+fn check_channels<const D: i16>(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<ColorInt> {
+    let dr = c2.r as i16 - c1.r as i16;
+
+    // The compiler sees "dr % 2" (or 5, 10, etc.) and optimizes it.
+    if dr % D != 0 { return None; }
+
+    let dg = c2.g as i16 - c1.g as i16;
+    if dg % D != 0 { return None; }
+
+    let db = c2.b as i16 - c1.b as i16;
+    if db % D != 0 { return None; }
+
     Some(ColorInt {
-        r: (r_100 / 100) as u8,
-        g: (g_100 / 100) as u8,
-        b: (b_100 / 100) as u8,
+        // We still need 't' here to calculate the actual blended color
+        r: (c1.r as i16 + (dr * t as i16) / 100) as u8,
+        g: (c1.g as i16 + (dg * t as i16) / 100) as u8,
+        b: (c1.b as i16 + (db * t as i16) / 100) as u8,
     })
 }
 
@@ -183,7 +195,7 @@ fn main() {
                 for transparency in &TRANSPARENCIES {
                     if let Some(mixed_color) = average_colors(&ColorInt::from_index(*color), &ColorInt::from_index(*other_color), *transparency) {
                         let mixed_index = mixed_color.to_index() as usize;
-                        if !constructions[mixed_index].get().is_some() {
+                        if constructions[mixed_index].get().is_none() {
                             // let const1 = constructions.get(color).unwrap();
                             // let const2 = constructions.get(other_color).unwrap();
                             let construction = ColorConstruction {
@@ -193,7 +205,17 @@ fn main() {
                                 steps: 0, //max(const1_steps, const2_steps) + 1,
                             };
                             constructions[mixed_index].set(ColorMix::Mixed(construction));
-                            total.fetch_add(1, Ordering::Relaxed);
+                            let t = total.fetch_add(1, Ordering::Relaxed);
+                            // if t & (2<<20)-1 == 0 {
+                            //     std::process::exit(0);
+                            // }
+                            if t & (2<<16)-1 == 0 {
+                                println!("Constructions found: {} ({}%)", t, t as f64/(TOTAL_COLORS as f64) * 100.0);
+                            }
+                            if t == TOTAL_COLORS as u32 {
+                                println!("All colors constructed!");
+                                std::process::exit(0);
+                            }
                         }
                     }
                 }
