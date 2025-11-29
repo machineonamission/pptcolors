@@ -618,7 +618,7 @@ fn main() {
     }
     // println!("{} {} {}", thirdr, thirdb, thirdg);
 
-    std::process::exit(0);
+    // std::process::exit(0);
 
     let mut trees: Vec<Vec<ChannelMixDetailed>> = vec!(vec!();3);
 
