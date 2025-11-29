@@ -1,0 +1,13 @@
+[package]
+name = "pptcolors"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dashmap = "6.1.0"
+num = "0.4.3"
+rayon = "1.11.0"
+rustc-hash = "2.1.1"
+
+[profile.release]
+debug = true
