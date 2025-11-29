@@ -127,6 +127,36 @@ const TRANSPARENCIES: [u8; 6] = [15, 30, 50, 65, 80, 95];
 
 const TOTAL_COLORS: usize = 2usize.pow(8).pow(3);
 
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
+struct ColorDetailed {
+    color1: Box<MixDetailed>,
+    color2: Box<MixDetailed>,
+    transparency: u8,
+    steps: usize,
+}
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
+enum MixDetailed {
+    Base(ColorInt),
+    Mixed(ColorDetailed),
+}
+fn trace_color(mix: &ColorMix, constructions: &Vec<OnceLock<ColorMix>>) -> MixDetailed {
+    match mix {
+        ColorMix::Base(a) => {
+            MixDetailed::Base(ColorInt::from_index(*a))
+        }
+        ColorMix::Mixed(construction) => {
+            MixDetailed::Mixed(
+                ColorDetailed {
+                    color1: Box::from(trace_color(&constructions[construction.color1 as usize].get().unwrap(), constructions)),
+                    color2: Box::from(trace_color(&constructions[construction.color2 as usize].get().unwrap(), constructions)),
+                    transparency: construction.transparency,
+                    steps: construction.steps,
+                }
+            )
+        }
+    }
+}
+
 fn main() {
     let colors: Vec<ColorInt> = INPUT
         .iter()
