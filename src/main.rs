@@ -168,6 +168,9 @@ fn main() {
             g: hex_to_int(&hex[2..4]),
             b: hex_to_int(&hex[4..6]),
         })
+        .filter(|c| {
+            c.r == 255 || c.r == 0 && c.g == 255 || c.g == 0 && c.b == 255 || c.b == 0
+        })
         .collect();
 
     // let interesting_values = [0u8, 1u8, 255u8];
@@ -196,7 +199,7 @@ fn main() {
     .try_into()
     .unwrap();
     let mut critical_array: [bool; 256] = [false; 256];
-    for v in critical_values {
+    for v in critical_values.clone() {
         critical_array[v as usize] = true;
     }
     // let interesting_indices: Vec<u32> = interesting_colors.iter().map(|c| c.to_index()).collect();
@@ -233,16 +236,12 @@ fn main() {
         .take(TOTAL_COLORS)
         .collect();
 
-    // let mut int_constructions: FxHashSet<ColorFractions> = FxHashSet::default();
-    let mut interesting_total = AtomicU32::new(0);
 
     for color in &colors {
-        if interesting_indices.contains(&(color.to_index())) {
-            interesting_total.fetch_add(1, Ordering::Relaxed);
-        }
         constructions[color.to_index() as usize].set(ColorMix::Base(color.to_index()));
         // int_constructions.insert(color.clone());
     }
+
     let mut total = AtomicU32::new(0);
     let mut iteration = 1;
     loop {
@@ -283,17 +282,7 @@ fn main() {
                                 .set(ColorMix::Mixed(construction.clone()))
                                 .is_ok()
                             {
-                                if interesting_indices.contains(&(mixed_index as u32)) {
-                                    let it = interesting_total.fetch_add(1, Ordering::Relaxed);
-                                    println!("Interesting constructions found: {}", it);
-                                    println!(
-                                        "{:#?}",
-                                        trace_color(
-                                            &ColorMix::Mixed(construction.clone()),
-                                            &constructions
-                                        )
-                                    );
-                                }
+
                                 let t = total.fetch_add(1, Ordering::Relaxed);
                                 // if t & (2<<20)-1 == 0 {
                                 //     std::process::exit(0);
@@ -304,6 +293,28 @@ fn main() {
                                         t,
                                         t as f64 / (TOTAL_COLORS as f64) * 100.0
                                     );
+
+                                    for c_r in critical_values.clone() {
+                                        for c_g in critical_values.clone() {
+                                            'outer: for c_b in critical_values.clone() {
+                                                for r in [0,c_r,255] {
+                                                    for g in [0,c_g,255] {
+                                                        for b in [0,c_b,255] {
+                                                            let col = ColorInt {
+                                                                r,g,b
+                                                            };
+                                                            if constructions[col.to_index() as usize].get().is_none() {
+                                                                continue 'outer;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                println!("HOOOOOLY FUCKING SHIT");
+                                                println!("{} {} {}", c_r, c_g, c_b);
+                                            }
+                                        }
+                                    }
+
                                 }
                                 if t == TOTAL_COLORS as u32 {
                                     println!("All colors constructed!");
