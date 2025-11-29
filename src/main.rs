@@ -686,6 +686,7 @@ fn main() {
         }
         let mut p = possibles.iter().collect::<Vec<_>>();
         p.sort();
+        println!("{t}: {:?}",p);
         println!("{t}: {:?}",p.iter().map(|c| format!("{:02X}", c)).collect::<Vec<String>>());
     }
 
