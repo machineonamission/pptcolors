@@ -600,85 +600,96 @@ fn main() {
         Bset.insert(color.b);
     }
 
-    let mut Rs: Vec<u8> = Rset.drain().collect();
-    let mut Gs: Vec<u8> = Gset.drain().collect();
-    let mut Bs: Vec<u8> = Bset.drain().collect();
+    // let mut Rs: Vec<u8> = Rset.drain().collect();
+    // let mut Gs: Vec<u8> = Gset.drain().collect();
+    // let mut Bs: Vec<u8> = Bset.drain().collect();
+    let mut Rs: Vec<u8> = vec![0,255,8];
+    let mut Gs: Vec<u8> = vec![0,255,8];
+    let mut Bs: Vec<u8> = vec![0,255,8];
 
-    for r in &Rs {
-        for g in &Gs {
-            for b in &Bs {
-                let col = ColorInt{r:*r,g:*g,b:*b};
-                if !colors.contains(&col) {
-                    // continue 'outer;
-                    println!("Invalid color: {}", col.to_hex());
-                    std::process::exit(1);
-                }
-            }
-        }
-    }
+    // for r in &Rs {
+    //     for g in &Gs {
+    //         for b in &Bs {
+    //             let col = ColorInt{r:*r,g:*g,b:*b};
+    //             if !colors.contains(&col) {
+    //                 // continue 'outer;
+    //                 println!("Invalid color: {}", col.to_hex());
+    //                 std::process::exit(1);
+    //             }
+    //         }
+    //     }
+    // }
     // println!("{} {} {}", thirdr, thirdb, thirdg);
 
     // std::process::exit(0);
 
     let mut trees: Vec<Vec<ChannelMixDetailed>> = vec!(vec!();3);
-
-    for (i, channel) in [Rs, Gs, Bs].iter().enumerate() {
-        let transparency = 50u8;
-        let mut constructions: Vec<ChannelMix> = vec![ChannelMix::Unknown; 256];
-        for val in channel {
-            constructions[*val as usize] = ChannelMix::Base(*val);
-        }
-        let mut iterations = 0;
-        loop {
-            if iterations > 100 {
-                std::process::exit(0);
+    let mut possibles: FxHashSet<u8> = FxHashSet::default();
+    for t in TRANSPARENCIES {
+        for third in 1..255 {
+            let channel = vec![0,third,255];
+            let transparency = 50u8;
+            let mut constructions: Vec<ChannelMix> = vec![ChannelMix::Unknown; 256];
+            for val in channel {
+                constructions[val as usize] = ChannelMix::Base(val);
             }
-            let mut found_count = 0;
-            for x in 0..=255 {
-                match constructions[x] {
-                    ChannelMix::Unknown => {}
-                    _ => {found_count += 1;}
+            let mut iterations = 0;
+            loop {
+                if iterations > 100 {
+                    break
                 }
-            }
-            println!("{}", found_count);
-            if found_count >= 256 {
-                println!("done");
-                // println!("{:#?}", constructions);
+                let mut found_count = 0;
                 for x in 0..=255 {
-                    println!("{x}={}", trace_channel_readable(x, &constructions));
-                    trees[i].push(trace_channel(x, &constructions));
+                    match constructions[x] {
+                        ChannelMix::Unknown => {}
+                        _ => {found_count += 1;}
+                    }
                 }
-                break;
-            }
-            iterations += 1;
-            println!("iteration {}", iterations);
-            for x in 0..=255 {
-                match constructions[x] {
-                    ChannelMix::Unknown => {}
-                    _ => {
-                        for y in 0..=255 {
-                            match constructions[y] {
-                                ChannelMix::Unknown => {}
-                                _ => {
-                                    if let Some(avg) = average_channel_generic(x as u8, y as u8, transparency) {
-                                        if let ChannelMix::Unknown = constructions[avg as usize] {
-                                            constructions[avg as usize] = ChannelMix::Mixed(ChannelConstruction {
-                                                color1: x as u8,
-                                                color2: y as u8,
-                                                transparency,
-                                            })
+                // println!("{}", found_count);
+                if found_count >= 256 {
+                    println!("third {} with transparency {} can reach all", third, t);
+                    possibles.insert(third);
+                    // println!("{:#?}", constructions);
+                    // for x in 0..=255 {
+                    //     println!("{x}={}", trace_channel_readable(x, &constructions));
+                    //     trees[i].push(trace_channel(x, &constructions));
+                    // }
+                    break;
+                }
+                iterations += 1;
+                // println!("iteration {}", iterations);
+                for x in 0..=255 {
+                    match constructions[x] {
+                        ChannelMix::Unknown => {}
+                        _ => {
+                            for y in 0..=255 {
+                                match constructions[y] {
+                                    ChannelMix::Unknown => {}
+                                    _ => {
+                                        if let Some(avg) = average_channel_generic(x as u8, y as u8, transparency) {
+                                            if let ChannelMix::Unknown = constructions[avg as usize] {
+                                                constructions[avg as usize] = ChannelMix::Mixed(ChannelConstruction {
+                                                    color1: x as u8,
+                                                    color2: y as u8,
+                                                    transparency,
+                                                })
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
+                }
+                // println!("{:?}", constructions)
             }
-            // println!("{:?}", constructions)
         }
     }
+    let mut p = possibles.iter().collect::<Vec<_>>();
+    p.sort();
+    println!("{:?}",p);
+
     for r in 0..=255u8 {
         for g in 0..=255u8 {
             for b in 0..=255u8 {
