@@ -175,6 +175,7 @@ fn main() {
     }
     let mut total = AtomicU32::new(0);
     let mut iteration = 1;
+    let mut next_constructions = constructions.clone();
     loop {
         println!("iteration: {}", iteration);
         // println!("Combinations tried: {}", combination_mixed.len());
@@ -182,29 +183,33 @@ fn main() {
         println!();
         let mut keys: Vec<u32> = vec!();
         for i in 0..TOTAL_COLORS {
-            if constructions[i].get().is_some() {
+            if next_constructions[i].get().is_some() {
                 keys.push(i as u32);
             }
         }
+        next_constructions = std::iter::repeat_with(OnceLock::new)
+            .take(TOTAL_COLORS)
+            .collect();
         keys.par_iter().for_each(|color| {
-            for other_color in &keys {
+            for other_color in &colors {
                 // if combination_mixed[*color as usize][*other_color as usize].load(Ordering::Relaxed) {
                 //     continue;
                 // }
                 // combination_mixed[*color as usize][*other_color as usize].store(true, Ordering::Relaxed);
                 for transparency in &TRANSPARENCIES {
-                    if let Some(mixed_color) = average_colors(&ColorInt::from_index(*color), &ColorInt::from_index(*other_color), *transparency) {
+                    if let Some(mixed_color) = average_colors(&ColorInt::from_index(*color), other_color, *transparency) {
                         let mixed_index = mixed_color.to_index() as usize;
                         if constructions[mixed_index].get().is_none() {
                             // let const1 = constructions.get(color).unwrap();
                             // let const2 = constructions.get(other_color).unwrap();
                             let construction = ColorConstruction {
                                 color1: color.clone(),
-                                color2: other_color.clone(),
+                                color2: other_color.clone().to_index(),
                                 transparency: transparency.clone(),
                                 steps: 0, //max(const1_steps, const2_steps) + 1,
                             };
-                            constructions[mixed_index].set(ColorMix::Mixed(construction));
+                            constructions[mixed_index].set(ColorMix::Mixed(construction.clone()));
+                            next_constructions[mixed_index].set(ColorMix::Mixed(construction));
                             let t = total.fetch_add(1, Ordering::Relaxed);
                             // if t & (2<<20)-1 == 0 {
                             //     std::process::exit(0);
