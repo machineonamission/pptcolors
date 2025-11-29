@@ -1,9 +1,11 @@
+use dashmap::{DashMap, DashSet};
+use num::{BigInt, FromPrimitive, Rational64};
+use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
-use num::{BigInt, Rational64, FromPrimitive};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::max;
-use dashmap::{DashMap, DashSet};
-use rayon::iter::IntoParallelRefIterator;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::OnceLock;
 
 const INPUT: [&str; 143] = [
     "000000", "000066", "000099", "0000CC", "0000FF", "003300", "003366", "003399", "0033CC",
@@ -39,22 +41,30 @@ struct ColorFractions {
 }
 
 impl ColorInt {
-    fn to_index(&self) -> usize {
-        (self.r as usize) << 16 | (self.g as usize) << 8 | (self.b as usize)
+    fn to_index(&self) -> u32 {
+        (self.r as u32) << 16 | (self.g as u32) << 8 | (self.b as u32)
+    }
+
+    fn from_index(index: u32) -> ColorInt {
+        ColorInt {
+            r: ((index >> 16) & 0xFF) as u8,
+            g: ((index >> 8) & 0xFF) as u8,
+            b: (index & 0xFF) as u8,
+        }
     }
 }
 
 #[derive(Eq, Hash, PartialEq, Clone)]
 struct ColorConstruction {
-    color1: ColorFractions,
-    color2: ColorFractions,
+    color1: u32,
+    color2: u32,
     transparency: u8,
     steps: usize,
 }
 
 #[derive(Eq, Hash, PartialEq, Clone)]
 enum ColorMix {
-    Base(ColorFractions),
+    Base(u32),
     Mixed(ColorConstruction),
 }
 
@@ -62,15 +72,27 @@ fn hex_to_int(hex: &str) -> u8 {
     u8::from_str_radix(hex, 16).unwrap()
 }
 
-fn average_colors(color1: &ColorInt, color2: &ColorInt, transparency: u8) -> ColorInt {
-    ColorInt {
-        r: ((color1.r as u16 * (100 - transparency) as u16 + color2.r as u16 * transparency as u16)
-            / 100) as u8,
-        g: ((color1.g as u16 * (100 - transparency) as u16 + color2.g as u16 * transparency as u16)
-            / 100) as u8,
-        b: ((color1.b as u16 * (100 - transparency) as u16 + color2.b as u16 * transparency as u16)
-            / 100) as u8,
+fn average_colors(color1: &ColorInt, color2: &ColorInt, transparency: u8) -> Option<ColorInt> {
+    let r_100 =
+        (color1.r as u16 * (100 - transparency) as u16 + color2.r as u16 * transparency as u16);
+    if r_100 % 100 != 0 {
+        return None;
     }
+    let g_100 =
+        (color1.g as u16 * (100 - transparency) as u16 + color2.g as u16 * transparency as u16);
+    if g_100 % 100 != 0 {
+        return None;
+    }
+    let b_100 =
+        (color1.b as u16 * (100 - transparency) as u16 + color2.b as u16 * transparency as u16);
+    if b_100 % 100 != 0 {
+        return None;
+    }
+    Some(ColorInt {
+        r: (r_100 / 100) as u8,
+        g: (g_100 / 100) as u8,
+        b: (b_100 / 100) as u8,
+    })
 }
 
 fn average_colors_fractions(
@@ -100,83 +122,80 @@ fn main() {
         })
         .collect();
 
-    let color_fractions: Vec<ColorFractions> = colors
-        .iter()
-        .clone()
-        .map(|hex| ColorFractions {
-            r: Rational64::from_u8(hex.r).unwrap(),
-            g: Rational64::from_u8(hex.g).unwrap(),
-            b: Rational64::from_u8(hex.b).unwrap(),
-        })
+    // let color_fractions: Vec<ColorFractions> = colors
+    //     .iter()
+    //     .clone()
+    //     .map(|hex| ColorFractions {
+    //         r: Rational64::from_u8(hex.r).unwrap(),
+    //         g: Rational64::from_u8(hex.g).unwrap(),
+    //         b: Rational64::from_u8(hex.b).unwrap(),
+    //     })
+    //     .collect();
+
+    // let transparencies_ratios: [(u8, Rational64, Rational64); 6] = TRANSPARENCIES
+    //     .iter()
+    //     .map(|&t| {
+    //         let base = 100i64;
+    //         let top = t as i64;
+    //         (
+    //             t.clone(),
+    //             Rational64::new(top.clone(), base.clone()),
+    //             Rational64::new(base.clone() - top.clone(), base.clone()),
+    //         )
+    //     })
+    //     .collect::<Vec<(u8, Rational64, Rational64)>>()
+    //     .try_into()
+    //     .unwrap();
+
+    // let combination_mixed: Vec<Vec<AtomicBool>> = (0..TOTAL_COLORS)
+    //     .map(|_| (0..TOTAL_COLORS).map(|_| AtomicBool::new(false)).collect())
+    //     .collect();
+
+    let constructions: Vec<OnceLock<ColorMix>> = std::iter::repeat_with(OnceLock::new)
+        .take(TOTAL_COLORS)
         .collect();
-
-    let transparencies_ratios: [(u8, Rational64, Rational64); 6] = TRANSPARENCIES
-        .iter()
-        .map(|&t| {
-            let base = 100i64;
-            let top = t as i64;
-            (
-                t.clone(),
-                Rational64::new(top.clone(), base.clone()),
-                Rational64::new(base.clone() - top.clone(), base.clone()),
-            )
-        })
-        .collect::<Vec<(u8, Rational64, Rational64)>>()
-        .try_into()
-        .unwrap();
-
-    let mut combination_mixed: DashSet<(ColorFractions, ColorFractions)> = DashSet::default();
-
-    let mut constructions: DashMap<ColorFractions, ColorMix> = DashMap::default();
 
     // let mut int_constructions: FxHashSet<ColorFractions> = FxHashSet::default();
 
-    for color in &color_fractions {
-        constructions.insert(color.clone(), ColorMix::Base(color.clone()));
+    for color in &colors {
+        constructions[color.to_index() as usize].set(ColorMix::Base(color.to_index()));
         // int_constructions.insert(color.clone());
     }
-    let mut tries = 0;
+    let mut total = AtomicU32::new(0);
     let mut iteration = 1;
     loop {
         println!("iteration: {}", iteration);
-        println!("Combinations tried: {}", combination_mixed.len());
-        println!("Constructions found: {}", constructions.len());
+        // println!("Combinations tried: {}", combination_mixed.len());
+        println!("Constructions found: {}", total.get_mut());
         println!();
-        let keys: Vec<ColorFractions> = constructions.iter().map(|ref_multi| ref_multi.key().clone()).collect();
+        let mut keys: Vec<u32> = vec!();
+        for i in 0..TOTAL_COLORS {
+            if constructions[i].get().is_some() {
+                keys.push(i as u32);
+            }
+        }
         keys.par_iter().for_each(|color| {
-            let mut tries = 0;
             for other_color in &keys {
-                tries += 1;
-                if tries % 10_000 == 0 {
-                    println!("iteration: {}", iteration);
-                    println!("Combinations tried: {}", combination_mixed.len());
-                    println!("Constructions found: {}", constructions.len());
-                    println!();
-                }
-                if combination_mixed.contains(&(color.clone(), other_color.clone())) {
-                    continue;
-                }
-                combination_mixed.insert((color.clone(), other_color.clone()));
-                for (transparency, ratio, inv_ratio) in transparencies_ratios.iter() {
-                    let mixed_color =
-                        average_colors_fractions(color, other_color, ratio, inv_ratio);
-                    if mixed_color.r.is_integer()
-                        && mixed_color.g.is_integer()
-                        && mixed_color.b.is_integer()
-                    {
-                        if !constructions.contains_key(&mixed_color) {
+                // if combination_mixed[*color as usize][*other_color as usize].load(Ordering::Relaxed) {
+                //     continue;
+                // }
+                // combination_mixed[*color as usize][*other_color as usize].store(true, Ordering::Relaxed);
+                for transparency in &TRANSPARENCIES {
+                    if let Some(mixed_color) = average_colors(&ColorInt::from_index(*color), &ColorInt::from_index(*other_color), *transparency) {
+                        let mixed_index = mixed_color.to_index() as usize;
+                        if !constructions[mixed_index].get().is_some() {
                             // let const1 = constructions.get(color).unwrap();
                             // let const2 = constructions.get(other_color).unwrap();
                             let construction = ColorConstruction {
                                 color1: color.clone(),
                                 color2: other_color.clone(),
                                 transparency: transparency.clone(),
-                                steps: 0//max(const1_steps, const2_steps) + 1,
+                                steps: 0, //max(const1_steps, const2_steps) + 1,
                             };
-                            constructions.insert(mixed_color.clone(), ColorMix::Mixed(construction));
+                            constructions[mixed_index].set(ColorMix::Mixed(construction));
+                            total.fetch_add(1, Ordering::Relaxed);
                         }
                     }
-
                 }
             }
         });
