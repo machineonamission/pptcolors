@@ -168,9 +168,9 @@ fn main() {
             g: hex_to_int(&hex[2..4]),
             b: hex_to_int(&hex[4..6]),
         })
-        .filter(|c| {
-            c.r == 255 || c.r == 0 && c.g == 255 || c.g == 0 && c.b == 255 || c.b == 0
-        })
+        // .filter(|c| {
+        //     c.r == 255 || c.r == 0 && c.g == 255 || c.g == 0 && c.b == 255 || c.b == 0
+        // })
         .collect();
 
     // let interesting_values = [0u8, 1u8, 255u8];
