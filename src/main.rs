@@ -89,22 +89,24 @@ fn average_colors(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<ColorInt> {
 // 2. We take 3 runtime arguments: c1, c2, t
 #[inline(always)]
 fn check_channels<const D: i16>(c1: &ColorInt, c2: &ColorInt, t: u8) -> Option<ColorInt> {
-    let dr = c2.r as i16 - c1.r as i16;
+    // 1. Pre-calculate constants for the frame/pixel
+    // All math fits in u16 (Max value: 255 * 100 + 50 = 25,550)
+    let t = t as u16;
+    let inv_t = 100 - t;
 
-    // The compiler sees "dr % 2" (or 5, 10, etc.) and optimizes it.
-    if dr % D != 0 { return None; }
-
-    let dg = c2.g as i16 - c1.g as i16;
-    if dg % D != 0 { return None; }
-
-    let db = c2.b as i16 - c1.b as i16;
-    if db % D != 0 { return None; }
+    // 2. The Branchless Calculation
+    // We define a closure (or macro) to enforce inlining
+    let blend_channel = |v1: u8, v2: u8| -> u8 {
+        // Formula: (v1 * (100-t) + v2 * t + 50) / 100
+        // The "+ 50" automatically rounds to nearest integer
+        let sum = (v1 as u16 * inv_t) + (v2 as u16 * t) + 50;
+        (sum / 100) as u8
+    };
 
     Some(ColorInt {
-        // We still need 't' here to calculate the actual blended color
-        r: (c1.r as i16 + (dr * t as i16) / 100) as u8,
-        g: (c1.g as i16 + (dg * t as i16) / 100) as u8,
-        b: (c1.b as i16 + (db * t as i16) / 100) as u8,
+        r: blend_channel(c1.r, c2.r),
+        g: blend_channel(c1.g, c2.g),
+        b: blend_channel(c1.b, c2.b),
     })
 }
 
