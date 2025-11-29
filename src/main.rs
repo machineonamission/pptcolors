@@ -26,7 +26,7 @@ const INPUT: [&str; 143] = [
     "FFCC99", "FFCCCC", "FFCCFF", "FFFF00", "FFFF66", "FFFF99", "FFFFCC", "FFFFFF",
 ];
 
-#[derive(Eq, Hash, PartialEq, Clone)]
+#[derive(Eq, Hash, PartialEq, Clone, Debug)]
 struct ColorInt {
     r: u8,
     g: u8,
@@ -55,6 +55,7 @@ impl ColorInt {
 }
 
 #[derive(Eq, Hash, PartialEq, Clone)]
+#[derive(Debug)]
 struct ColorConstruction {
     color1: u32,
     color2: u32,
@@ -134,6 +135,17 @@ fn main() {
         })
         .collect();
 
+    let interesting_values = [0u8,1u8,255u8];
+    let mut interesting_colors: Vec<ColorInt> = vec!();
+    for r in &interesting_values {
+        for g in &interesting_values {
+            for b in &interesting_values {
+                let color = ColorInt { r: *r, g: *g, b: *b };
+                interesting_colors.push(color);
+            }
+        }
+    }
+    let interesting_indices: Vec<u32> = interesting_colors.iter().map(|c| c.to_index()).collect();
     // let color_fractions: Vec<ColorFractions> = colors
     //     .iter()
     //     .clone()
@@ -168,8 +180,12 @@ fn main() {
         .collect();
 
     // let mut int_constructions: FxHashSet<ColorFractions> = FxHashSet::default();
+    let mut interesting_total = AtomicU32::new(0);
 
     for color in &colors {
+        if interesting_indices.contains(&(color.to_index())) {
+            interesting_total.fetch_add(1, Ordering::Relaxed);
+        }
         constructions[color.to_index() as usize].set(ColorMix::Base(color.to_index()));
         // int_constructions.insert(color.clone());
     }
@@ -204,17 +220,24 @@ fn main() {
                                 transparency: transparency.clone(),
                                 steps: 0, //max(const1_steps, const2_steps) + 1,
                             };
-                            constructions[mixed_index].set(ColorMix::Mixed(construction));
-                            let t = total.fetch_add(1, Ordering::Relaxed);
-                            // if t & (2<<20)-1 == 0 {
-                            //     std::process::exit(0);
-                            // }
-                            if t & (2<<16)-1 == 0 {
-                                println!("Constructions found: {} ({}%)", t, t as f64/(TOTAL_COLORS as f64) * 100.0);
-                            }
-                            if t == TOTAL_COLORS as u32 {
-                                println!("All colors constructed!");
-                                std::process::exit(0);
+
+                            if constructions[mixed_index].set(ColorMix::Mixed(construction)).is_ok() {
+                                if interesting_indices.contains(&(mixed_index as u32)) {
+                                    let it = interesting_total.fetch_add(1, Ordering::Relaxed);
+                                    println!("Interesting constructions found: {}", it);
+                                    println!("{:?} = {:?} + {:?} ({}%)", mixed_color, ColorInt::from_index(*color), &ColorInt::from_index(*other_color), transparency)
+                                }
+                                let t = total.fetch_add(1, Ordering::Relaxed);
+                                // if t & (2<<20)-1 == 0 {
+                                //     std::process::exit(0);
+                                // }
+                                if t & (2<<16)-1 == 0 {
+                                    println!("Constructions found: {} ({}%)", t, t as f64/(TOTAL_COLORS as f64) * 100.0);
+                                }
+                                if t == TOTAL_COLORS as u32 {
+                                    println!("All colors constructed!");
+                                    std::process::exit(0);
+                                }
                             }
                         }
                     }
