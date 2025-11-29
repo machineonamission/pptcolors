@@ -163,6 +163,22 @@ fn main() {
     //     .map(|_| (0..TOTAL_COLORS).map(|_| AtomicBool::new(false)).collect())
     //     .collect();
 
+    let critical_values: Vec<u8> = [
+        1, 2, 4, 7, 8, 11, 13, 14, 16, 19, 22, 23, 26, 28, 29, 31, 32, 37, 38, 41, 43, 44, 46, 47,
+        49, 52, 53, 56, 58, 59, 61, 62, 64, 67, 71, 73, 74, 76, 77, 79, 82, 83, 86, 88, 89, 91, 92,
+        94, 97, 98, 101, 103, 104, 106, 107, 109, 112, 113, 116, 118, 121, 122, 124, 127, 128, 131,
+        133, 134, 137, 139, 142, 143, 146, 148, 149, 151, 152, 154, 157, 158, 161, 163, 164, 166,
+        167, 169, 172, 173, 176, 178, 179, 181, 182, 184, 188, 191, 193, 194, 196, 197, 199, 202,
+        203, 206, 208, 209, 211, 212, 214, 217, 218, 223, 224, 226, 227, 229, 232, 233, 236, 239,
+        241, 242, 244, 247, 248, 251, 253, 254,
+    ]
+        .try_into()
+        .unwrap();
+    let mut critical_array: [bool; 256] = [false; 256];
+    for v in critical_values.clone() {
+        critical_array[v as usize] = true;
+    }
+
     let constructions: Vec<OnceLock<ColorMix>> = std::iter::repeat_with(OnceLock::new)
         .take(TOTAL_COLORS)
         .collect();
@@ -216,6 +232,26 @@ fn main() {
                             // }
                             if t & (2<<16)-1 == 0 {
                                 println!("Constructions found: {} ({}%)", t, t as f64/(TOTAL_COLORS as f64) * 100.0);
+                                for c_r in critical_values.clone() {
+                                    for c_g in critical_values.clone() {
+                                        'outer: for c_b in critical_values.clone() {
+                                            for r in [0,c_r,255] {
+                                                for g in [0,c_g,255] {
+                                                    for b in [0,c_b,255] {
+                                                        let col = ColorInt {
+                                                            r,g,b
+                                                        };
+                                                        if constructions[col.to_index() as usize].get().is_none() {
+                                                            continue 'outer;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            println!("HOOOOOLY FUCKING SHIT");
+                                            println!("{} {} {}", c_r, c_g, c_b);
+                                        }
+                                    }
+                                }
                             }
                             if t == TOTAL_COLORS as u32 {
                                 println!("All colors constructed!");
